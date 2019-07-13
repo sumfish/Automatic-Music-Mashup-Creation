@@ -7,33 +7,49 @@ from scipy import ndimage
 from math import sqrt
 import math
 
-sample = 'musicset/000221.wav'
-sample2 = 'musicset/000226.wav'
-def mashibility():
-    input_gram = chroma(sample2)
-    print(input_gram.shape)
-    '''
-    can_gram = chroma(sample)
-    print(can_gram.shape)
+sample = '000221.wav'
+sample2 = '000226.wav'
+dir_path='musicset/'
 
+def mashibility():
+    input_gram,input_tempo = chroma(dir_path+sample2)
+    print(input_gram.shape)
+    
+    can_gram, can_tempo = chroma(dir_path+sample)
+    print(can_gram.shape)
+    
     #pitch_Shift
     can_gram24 =np.concatenate((can_gram,can_gram),axis=0) #24*beat
+    
+    '''
     librosa.display.specshow(can_gram24 ,y_axis='chroma')
     plt.xlabel('beat')
     plt.colorbar()
     plt.title('Chromagram(24*beat)')
     plt.savefig('chroma_24.png')
     '''
-    
-    #harmonic(input_gram,can_gram)
-    e_input=harmonic_complex(input_gram)
-    '''
-    e_can=harmonic_complex(can_gram)
-    W_t=harmonic_balan_w(e_input,e_can)
-    print('change_weight:{}'.format(W_t))
-    '''
+    # harmonic similarity
+    #S_c,pitch = harmonic(input_gram,can_gram)
 
-    #spectral()
+    # harmonic change balance
+    W_t = harmonic_balan_w(harmonic_complex(input_gram),harmonic_complex(can_gram))
+    print('change_weight:{}'.format(W_t))
+
+    # spectral 
+
+    # volume
+   
+    # tempo
+    W_tem=tempo_close_rate(input_tempo,can_tempo)
+
+    # final vertical mashability
+    #S_v=S_c*W_t+W_tem
+
+def tempo_close_rate(t1,t2):
+    if(abs(1-abs(float(t1)/t2))<0.3):
+        return 0.2
+    else:
+        return 0
 
 def harmonic_balan_w(p,q):
     return 1-abs(p-(1-q))
@@ -49,6 +65,7 @@ def harmonic_complex(gram):
         if(beat_simi>thre):
             count=count+1
     rate=float(count)/(i+1)
+    #print(len(draw),i+1)
     print('Complex rate={}'.format(rate))  
 
     '''
@@ -113,20 +130,21 @@ def chroma(loop):
     beat_chroma = librosa.util.sync(chromagram,
                                 beat_frames,
                                 aggregate=np.median)
+    
     '''
     librosa.display.specshow(beat_chroma,y_axis='chroma')
     plt.xlabel('beat')
     plt.colorbar()
     plt.title('Chromagram')
-    plt.savefig("chroma_12.png")
+    plt.savefig(loop+"_chroma_12.png")
     
     librosa.display.specshow(chromagram,y_axis='chroma')
     plt.xlabel('beat')
     plt.title('Chromagram(no_beat_sync)')
-    plt.savefig("chroma_nosyc.png")
+    plt.savefig(loop+"_chroma_nosyc.png")
     '''
     
-    return beat_chroma
+    return beat_chroma,tempo
 
 
     

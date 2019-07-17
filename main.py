@@ -1,21 +1,21 @@
-import numpy as np
 import matplotlib.pyplot as plt
-import pyrubberband as pyrb
-import librosa
-import os
-import shlex
-import subprocess
 import mashability as mas
-from pydub import AudioSegment #mix
-import soundfile as sf
+import generation  as gen
+import os
 
 input_phrase='000229.wav'
 input_path='./musicset/'
 can_path='./smallset/'
-can_output='candidate.wav'
+output_path='./output_audio/'
 
 def main():
     #input
+    if not os.path.isdir(output_path+input_phrase[:-4]):
+        try:
+            os.makedirs(output_path+input_phrase[:-4])
+        except FileExistsError:
+            print('have existed dir')
+                
     print("----input-----")
     input_chroma, input_spect, input_tempo = mas.chroma_and_spectral(input_path+input_phrase)
     print("input tempo:{}".format(input_tempo))
@@ -23,7 +23,7 @@ def main():
 
     '''
     #dataset candidate
-    print("----candidate-----")
+    print("----search candidate-----")
     V_mashability=0
     pitch_shift=0
     chosed_wave=''
@@ -40,62 +40,10 @@ def main():
     print(V_mashability, pitch_shift, chosed_wave)
     '''
     # generation
-    generation("000225.wav", 10, input_chroma, input_tempo)
+    print("---Generating---")
+    gen.generation("000225.wav", 10, input_chroma, input_tempo, input_phrase)
     #generation(chosed_wave, pitch_shift, input_chroma, input_tempo)
     
-def generation(matched_wave, pitch, input_chroma, input_tempo):
-    print("---Generating---")
-    print("choose:{}".format(matched_wave))
-    y, sr = librosa.load(can_path+matched_wave,sr=44100)
-    
-    # pitch shifting (maybe a little difference after shifting)
-    y_shift = pyrb.pitch_shift(y, sr, n_steps=-pitch)
-    #y_shift = librosa.effects.pitch_shift(y, sr, n_steps=pitch) #by liborsa
-
-    '''
-    # checked by hormonic
-    chromagram = librosa.feature.chroma_cqt(y=y_harmonic,sr=sr)
-    # We'll use the median value of each feature between beat frames                                   
-    beat_chroma = librosa.util.sync(chromagram,
-                                beat_frames,
-                                aggregate=np.median)
-    print('shape of can_chroma:{}'.format(beat_chroma.shape))
-    can_chroma24 =np.concatenate((beat_chroma,beat_chroma),axis=0)
-    mas.harmonic(input_chroma,can_chroma24)
-    '''
-
-    # time stretch
-    print("---Generating time stretching file---")
-    y_harmonic, y_percussive = librosa.effects.hpss(y_shift)
-    y_tempo, beat_frames = librosa.beat.beat_track(y=y_percussive,sr=sr)
-    print("can_tempo:{}".format(y_tempo))
-    rate =float(input_tempo)/y_tempo
-    print("stretch_rate:{}".format(rate))
-    #librosa.effects.time_stretch(y_shift, rate) #by liborsa
-    y_stretch_shift=pyrb.time_stretch(y_shift, sr, rate)
-    # seg11
-    sf.write(can_output, y_stretch_shift, samplerate=44100)    
-    #librosa.output.write_wav('candidate.wav',y_stretch_shift, sr=44100) #bit will be 64
-
-    # volume adjust
-    print("---Generating volume adjust file---")
-    FFMPEG_CMD = "ffmpeg-normalize"
-    cmd=FFMPEG_CMD+' -v -f '+can_output+' -o '+can_output[:-4]+'_normalized.wav'
-    subprocess.Popen(shlex.split(cmd))
-    cmd2=FFMPEG_CMD+' -v -f '+input_path+input_phrase+' -o '+input_path+input_phrase[:-4]+'_normalized.wav'
-    subprocess.Popen(shlex.split(cmd2))
-
-    # mix
-    print("---Generating mixed file---")
-    can_wave=AudioSegment.from_file(can_output[:-4]+'_normalized.wav')
-    input_wave=AudioSegment.from_file(input_path+input_phrase[:-4]+'_normalized.wav')
-    combined=input_wave.overlay(can_wave) #if can is longer than input, will be cut
-    # seg11
-    combined.export('combination.wav',format='wav')
-    
-    
-
-
 
 if __name__ == "__main__":
     main()

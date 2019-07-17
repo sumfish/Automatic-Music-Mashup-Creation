@@ -5,6 +5,7 @@ import librosa
 import os
 import mashability as mas
 from pydub import AudioSegment #mix
+import soundfile as sf
 
 input_phrase='000229.wav'
 input_path='./musicset/'
@@ -14,6 +15,7 @@ def main():
     #input
     print("----input-----")
     input_chroma, input_spect, input_tempo = mas.chroma_and_spectral(input_path+input_phrase)
+    print("input tempo:{}".format(input_tempo))
     stable_rate = mas.harmonic_complex(input_chroma)
 
     '''
@@ -41,13 +43,14 @@ def main():
 def generation(matched_wave, pitch, input_chroma, input_tempo):
     print("---Generating.....---")
     print("choose:{}".format(matched_wave))
-    y, sr = librosa.load(can_path+matched_wave)
+    y, sr = librosa.load(can_path+matched_wave,sr=44100)
     
     # pitch shifting (maybe a little difference after shifting)
     y_shift = pyrb.pitch_shift(y, sr, n_steps=-pitch)
     #y_shift = librosa.effects.pitch_shift(y, sr, n_steps=pitch) #by liborsa
     y_harmonic, y_percussive = librosa.effects.hpss(y_shift)
     y_tempo, beat_frames = librosa.beat.beat_track(y=y_percussive,sr=sr)
+    print("can_tempo:{}".format(y_tempo))
 
     '''
     # checked by hormonic
@@ -64,12 +67,18 @@ def generation(matched_wave, pitch, input_chroma, input_tempo):
     # time stretch
     rate =float(input_tempo)/y_tempo
     print("stretch_rate:{}".format(rate))
-    #librosa.effects.time_stretch(y_shift, rate)
+    #librosa.effects.time_stretch(y_shift, rate) #by liborsa
     y_stretch_shift=pyrb.time_stretch(y_shift, sr, rate)
-    librosa.output.write_wav('candidate.wav',y_stretch_shift, sr)
+    sf.write('candidate.wav', y_stretch_shift, samplerate=44100)    
+    #librosa.output.write_wav('candidate.wav',y_stretch_shift, sr=44100) #bit will be 64
 
+
+    # mix
+    can_wave=AudioSegment.from_file('candidate.wav')
+    input_wave=AudioSegment.from_file(input_path+input_phrase)
+    combined=input_wave.overlay(can_wave) #if can is longer than input, will be cut
+    combined.export('combination.wav',format='wav')
     
-
 
 
 

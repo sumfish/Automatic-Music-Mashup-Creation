@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import pyrubberband as pyrb
 import librosa
 import os
+import shlex
+import subprocess
 import mashability as mas
 from pydub import AudioSegment #mix
 import soundfile as sf
@@ -10,6 +12,7 @@ import soundfile as sf
 input_phrase='000229.wav'
 input_path='./musicset/'
 can_path='./smallset/'
+can_output='candidate.wav'
 
 def main():
     #input
@@ -36,21 +39,18 @@ def main():
                 chosed_wave=candidate   
     print(V_mashability, pitch_shift, chosed_wave)
     '''
-    #generation
+    # generation
     generation("000225.wav", 10, input_chroma, input_tempo)
     #generation(chosed_wave, pitch_shift, input_chroma, input_tempo)
     
 def generation(matched_wave, pitch, input_chroma, input_tempo):
-    print("---Generating.....---")
+    print("---Generating---")
     print("choose:{}".format(matched_wave))
     y, sr = librosa.load(can_path+matched_wave,sr=44100)
     
     # pitch shifting (maybe a little difference after shifting)
     y_shift = pyrb.pitch_shift(y, sr, n_steps=-pitch)
     #y_shift = librosa.effects.pitch_shift(y, sr, n_steps=pitch) #by liborsa
-    y_harmonic, y_percussive = librosa.effects.hpss(y_shift)
-    y_tempo, beat_frames = librosa.beat.beat_track(y=y_percussive,sr=sr)
-    print("can_tempo:{}".format(y_tempo))
 
     '''
     # checked by hormonic
@@ -65,19 +65,34 @@ def generation(matched_wave, pitch, input_chroma, input_tempo):
     '''
 
     # time stretch
+    print("---Generating time stretching file---")
+    y_harmonic, y_percussive = librosa.effects.hpss(y_shift)
+    y_tempo, beat_frames = librosa.beat.beat_track(y=y_percussive,sr=sr)
+    print("can_tempo:{}".format(y_tempo))
     rate =float(input_tempo)/y_tempo
     print("stretch_rate:{}".format(rate))
     #librosa.effects.time_stretch(y_shift, rate) #by liborsa
     y_stretch_shift=pyrb.time_stretch(y_shift, sr, rate)
-    sf.write('candidate.wav', y_stretch_shift, samplerate=44100)    
+    # seg11
+    sf.write(can_output, y_stretch_shift, samplerate=44100)    
     #librosa.output.write_wav('candidate.wav',y_stretch_shift, sr=44100) #bit will be 64
 
+    # volume adjust
+    print("---Generating volume adjust file---")
+    FFMPEG_CMD = "ffmpeg-normalize"
+    cmd=FFMPEG_CMD+' -v -f '+can_output+' -o '+can_output[:-4]+'_normalized.wav'
+    subprocess.Popen(shlex.split(cmd))
+    cmd2=FFMPEG_CMD+' -v -f '+input_path+input_phrase+' -o '+input_path+input_phrase[:-4]+'_normalized.wav'
+    subprocess.Popen(shlex.split(cmd2))
 
     # mix
-    can_wave=AudioSegment.from_file('candidate.wav')
-    input_wave=AudioSegment.from_file(input_path+input_phrase)
+    print("---Generating mixed file---")
+    can_wave=AudioSegment.from_file(can_output[:-4]+'_normalized.wav')
+    input_wave=AudioSegment.from_file(input_path+input_phrase[:-4]+'_normalized.wav')
     combined=input_wave.overlay(can_wave) #if can is longer than input, will be cut
+    # seg11
     combined.export('combination.wav',format='wav')
+    
     
 
 

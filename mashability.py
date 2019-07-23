@@ -3,19 +3,19 @@ import matplotlib.pyplot as plt
 import librosa
 import librosa.display
 from scipy.spatial import distance
-from scipy import ndimage
 from math import sqrt
 import math
-
-sample = '000223.wav'
-sample2 = '000229.wav'
-dir_path='musicset/'
+import faulthandler; faulthandler.enable()
+import madmom.audio.chroma as ch
+import madmom.features.downbeats as dbt
+import madmom.features.tempo as beat
+from madmom.features.beats import RNNBeatProcessor 
 
 def mashibility(input_chroma, input_spect, input_tempo, stable_rate, candidate):
     
-    can_chroma, can_spect, can_tempo = chroma_and_spectral(candidate)
+    can_chroma, can_spect, can_tempo= chroma_and_spectral(candidate)
     print('shape of can_chroma:{}'.format(can_chroma.shape))
-    if(can_chroma.shape[1]==0):
+    if(can_chroma.shape[1]<16):
         return 0, 0
 
     #pitch_Shift
@@ -34,7 +34,7 @@ def mashibility(input_chroma, input_spect, input_tempo, stable_rate, candidate):
     
     # harmonic change balance
     W_t = harmonic_balan_w(stable_rate,harmonic_complex(can_chroma))
-    print('change_weight:{}'.format(W_t))
+    #print('change_weight:{}'.format(W_t))
 
     # spectral 
     #band_filter(input_spect)
@@ -76,7 +76,7 @@ def harmonic_complex(gram):
             count=count+1
     stable_rate=float(count)/(i+1)
     #print(len(draw),i+1)
-    print('Stable rate={}'.format(stable_rate))  
+    #print('Stable rate={}'.format(stable_rate))  
 
     '''
     plt.figure()  
@@ -92,8 +92,6 @@ def harmonic_complex(gram):
     print('after sig rate={}'.format(complex_degree))
 
     return complex_degree
-
-
 
 
 def harmonic(input_gram,can_gram):
@@ -112,7 +110,7 @@ def harmonic(input_gram,can_gram):
         for i in range(input_gram.shape[1]): # axis = num of beat # shape(24,k)
             simi=1-distance.cosine(can_gram[pitch:pitch+12,i],input_gram[:,i]) # compare per beat
             cos_simi+=simi
-            ## bug for input is bigger than candidate(adjust 4 beat per bar)
+            ## for input is bigger than candidate(adjust 4 beat per bar)
             if(i==can_gram.shape[1]-1):
                 break
         cos_simi/=(i+1)
@@ -128,15 +126,52 @@ def harmonic(input_gram,can_gram):
 
 
 def chroma_and_spectral(loop):
+    ######## madmom
+    # chroma
+    pcp=ch.CLPChromaProcessor()
+    chroma=pcp(loop)
+    chroma=chroma.T #madmom form is different from librosa (frames,12(madmom)) <-> (12,frames(lib))
     
-    y, sr = librosa.load(loop) # sr=sample rate
-    y_harmonic, y_percussive = librosa.effects.hpss(y)
-    tempo, beat_frames = librosa.beat.beat_track(y=y_percussive,sr=sr)
-    #print(beat_frames.shape,tempo)
+    # downbeat
+    proc = dbt.DBNDownBeatTrackingProcessor(beats_per_bar= [4,4],fps=100)
+    act = dbt.RNNDownBeatProcessor()(loop)
+    #print(proc(act)[:,0]) #time v.s. index in a bar
+    hop_length = 512
+    beat_frames = librosa.time_to_frames(proc(act)[:,0],
+                                sr=44100, hop_length=hop_length)   
 
+    beat_chroma = librosa.util.sync(chroma,
+                                beat_frames,
+                                aggregate=np.median)
+    
+    '''
+    librosa.display.specshow(beat_chroma,x_axis='chroma')
+    plt.title('chromagram(madmom)')
+    plt.savefig("chroma(madmom).png")
+    '''
+
+    #tempo
+    proc2=beat.TempoEstimationProcessor(fps=100)
+    act2 = RNNBeatProcessor()(loop)
+    #print(proc2(act2)[0][0]) #tempo
+    tempo=proc2(act2)[0][0]
+
+    #spec
+    beat_spectral=0
+
+    '''
+    ######## librosa
+    y, sr = librosa.load(loop, sr=44100) # sr=sample rate
+    #print(sr)
+    
+    y_harmonic, y_percussive = librosa.effects.hpss(y)
+    tempo, beat_frames = librosa.beat.beat_track(y=y_percussive ,sr=sr)
+    print(beat_frames.shape,tempo)
+    
     # beatsynchronous chromagrams.
-    chromagram = librosa.feature.chroma_cqt(y=y_harmonic,sr=sr)
-    # We'll use the median value of each feature between beat frames                                   
+    chromagram = librosa.feature.chroma_cqt(y=y_harmonic,sr=sr,n_chroma=12)
+    # We'll use the median value of each feature between beat frames  
+             
     beat_chroma = librosa.util.sync(chromagram,
                                 beat_frames,
                                 aggregate=np.median)
@@ -148,7 +183,7 @@ def chroma_and_spectral(loop):
                                 beat_frames,
                                 aggregate=np.median)
     
-    '''
+    
     librosa.display.specshow(beat_spectral,y_axis='mel')
     plt.xlabel('beat')
     #plt.colorbar(format='%+2.0f dB')
@@ -167,12 +202,9 @@ def chroma_and_spectral(loop):
     plt.title('Chromagram(no_beat_sync)')
     plt.savefig(loop+"_chroma_nosyc.png")
     '''
-    
     return beat_chroma, beat_spectral, tempo
-
-
-    
+     
 '''
 if __name__ == "__main__":
-    mashibility()
+    chroma_and_spectral('./musicset/000228.wav')
 '''

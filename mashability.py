@@ -8,15 +8,15 @@ import math
 import faulthandler; faulthandler.enable()
 import madmom.audio.chroma as ch
 import madmom.features.downbeats as dbt
-import madmom.features.tempo as beat
+import madmom.features.tempo as bt
 from madmom.features.beats import RNNBeatProcessor 
 
-def mashibility(input_chroma, input_spect, input_tempo, stable_rate, candidate):
+def mashibility(input_chroma, input_spect, input_tempo, input_down, input_bar, stable_rate, candidate):
     
-    can_chroma, can_spect, can_tempo= chroma_and_spectral(candidate)
-    print('shape of can_chroma:{}'.format(can_chroma.shape))
-    if(can_chroma.shape[1]<16):
+    use, can_chroma, can_spect, can_tempo, down, bar= chroma_and_spectral(candidate)
+    if(use==False): #too short
         return 0, 0
+    print('shape of can_chroma:{}'.format(can_chroma.shape))
 
     #pitch_Shift
     can_chroma24 =np.concatenate((can_chroma,can_chroma),axis=0) #24*beat
@@ -30,15 +30,13 @@ def mashibility(input_chroma, input_spect, input_tempo, stable_rate, candidate):
     '''
 
     # harmonic similarity
-    S_c,pitch = harmonic(input_chroma,can_chroma24)
+    S_c,pitch = harmonic(input_chroma, can_chroma24, input_down, down)
     
     # harmonic change balance
     W_t = harmonic_balan_w(stable_rate,harmonic_complex(can_chroma))
     #print('change_weight:{}'.format(W_t))
 
     # spectral 
-    #band_filter(input_spect)
-    #spectral_balance(input_spect,can_spect)
     
     # tempo
     W_tem=tempo_close_rate(input_tempo,can_tempo)
@@ -47,13 +45,6 @@ def mashibility(input_chroma, input_spect, input_tempo, stable_rate, candidate):
     S_v=S_c*W_t+W_tem
 
     return S_v, pitch
-
-'''
-def band_filter(spectral):
-    print(spectral.shape)
-    for beat in range(spectral.shape[1]):
-        print(beat)
-'''
 
 def tempo_close_rate(t1,t2):
     if(abs(1-abs(float(t1)/t2))<0.3):
@@ -89,17 +80,14 @@ def harmonic_complex(gram):
 
     #sigmoid
     complex_degree=1 / (1 + math.exp(-stable_rate))
-    print('after sig rate={}'.format(complex_degree))
+    #print('after sig rate={}'.format(complex_degree))
 
     return complex_degree
 
 
-def harmonic(input_gram,can_gram):
-    # get chroma
+def harmonic(input_gram, can_gram, input_down, down):
+    # chroma index==beat+1?
     #print(input_gram[:,0])
-
-    # 2D convolution
-    # H_n=ndimage.convolve(gram, gram, mode='constant', cval=0.0)
     
     # cosine similiarity
     high_core_pitch=0 
@@ -107,11 +95,11 @@ def harmonic(input_gram,can_gram):
     ### ask 13?? +-6+0?
     for pitch in range(12): # pitch-shift 
         cos_simi=0
-        for i in range(input_gram.shape[1]): # axis = num of beat # shape(24,k)
-            simi=1-distance.cosine(can_gram[pitch:pitch+12,i],input_gram[:,i]) # compare per beat
+        for i in range(input_gram.shape[1]-input_down): # axis = num of beat # shape(24,k)
+            simi=1-distance.cosine(can_gram[pitch:pitch+12,down+i],input_gram[:,input_down+i]) # compare per beat
             cos_simi+=simi
             ## for input is bigger than candidate(adjust 4 beat per bar)
-            if(i==can_gram.shape[1]-1):
+            if(down+i==can_gram.shape[1]-1):
                 break
         cos_simi/=(i+1)
 
@@ -119,45 +107,63 @@ def harmonic(input_gram,can_gram):
             best_simi=cos_simi
             high_core_pitch=pitch
 
-    print('best_simi,high_core_pitch:{},{}'.format(best_simi,high_core_pitch))
+    #print('best_simi,high_core_pitch:{},{}'.format(best_simi,high_core_pitch))
 
     return best_simi,high_core_pitch
     
+def get_tempo(loop):
+    #tempo
+    proc2=bt.TempoEstimationProcessor(fps=100)
+    act2 = RNNBeatProcessor()(loop)
+    tempo=proc2(act2)[0][0]
+    return tempo
 
 
 def chroma_and_spectral(loop):
     ######## madmom
-    # chroma
-    pcp=ch.CLPChromaProcessor()
-    chroma=pcp(loop)
-    chroma=chroma.T #madmom form is different from librosa (frames,12(madmom)) <-> (12,frames(lib))
     
     # downbeat
     proc = dbt.DBNDownBeatTrackingProcessor(beats_per_bar= [4,4],fps=100)
     act = dbt.RNNDownBeatProcessor()(loop)
     #print(proc(act)[:,0]) #time v.s. index in a bar
-    hop_length = 512
     beat_frames = librosa.time_to_frames(proc(act)[:,0],
-                                sr=44100, hop_length=hop_length)   
+                                sr=44100, hop_length=512)   
 
+    # to get downbeat index and segment num 
+    # filter music with few bar
+    if np.sum(proc(act)[:,1]==1)<3 :
+        return False, 0, 0, 0, 0, 0
+
+    downbeat_first=np.argmin(proc(act)[:,1])
+    #bug for [1,5,9....] there is a beat before
+    if(beat_frames[0]!=0):
+        downbeat_first=downbeat_first+1
+    bar_num=math.floor((len(beat_frames)-downbeat_first)/4)
+    
+    '''
+    # chroma
+    pcp=ch.CLPChromaProcessor(fps=100)
+    chroma=pcp(loop)
+    chroma=chroma.T #madmom form is different from librosa (frames,12(madmom)) <-> (12,frames(lib))
+    '''
+    y, sr = librosa.load(loop, sr=44100) # sr=sample rate
+    y_harmonic, _ = librosa.effects.hpss(y)
+    # beatsynchronous chromagrams.
+    chroma = librosa.feature.chroma_cqt(y=y_harmonic,sr=sr,n_chroma=12)
     beat_chroma = librosa.util.sync(chroma,
                                 beat_frames,
                                 aggregate=np.median)
+    #tempo
+    tempo=get_tempo(loop)                           
     
+    #spec
+    beat_spectral=0
+
     '''
     librosa.display.specshow(beat_chroma,x_axis='chroma')
     plt.title('chromagram(madmom)')
     plt.savefig("chroma(madmom).png")
     '''
-
-    #tempo
-    proc2=beat.TempoEstimationProcessor(fps=100)
-    act2 = RNNBeatProcessor()(loop)
-    #print(proc2(act2)[0][0]) #tempo
-    tempo=proc2(act2)[0][0]
-
-    #spec
-    beat_spectral=0
 
     '''
     ######## librosa
@@ -202,7 +208,7 @@ def chroma_and_spectral(loop):
     plt.title('Chromagram(no_beat_sync)')
     plt.savefig(loop+"_chroma_nosyc.png")
     '''
-    return beat_chroma, beat_spectral, tempo
+    return True, beat_chroma, beat_spectral, tempo, downbeat_first, bar_num
      
 '''
 if __name__ == "__main__":
